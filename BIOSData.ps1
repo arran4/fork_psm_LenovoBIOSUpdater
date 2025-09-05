@@ -27,6 +27,9 @@
 .EXAMPLE
   
 #>
+param(
+    [string]$LogPath
+)
 
 #---------------------------------------------------------[Initialisations]--------------------------------------------------------
 
@@ -37,7 +40,6 @@ $ErrorActionPreference = "SilentlyContinue"
 
 #----------------------------------------------------------[Declarations]----------------------------------------------------------
 
-$logPath = "C:\Temp\"
 
 
 # These are the fields able to be set, use this array to set defaults - anything that has not value set upon processing will be ignored and thus no change will be made to existing data. To Blank the field please set to BLANK (Case Sesnsive)
@@ -345,15 +347,21 @@ function Get-CurrentBIOSData
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
 
-#Start log if file path exists
-if (!([string]::IsNullOrWhiteSpace($logPath)) -and !(Test-Path $logPath))
-{
-    New-Item -ItemType Directory -Force -Path $logPath
-}
-
 #Modules - Imported here to override defaults
 Import-Module "$PSScriptRoot/Config.ps1" -Force #Contains protected data (API Keys, URLs etc)
 #Import-Module "$PSScriptRoot/DevEnv.ps1" -Force ##Temporary Variables used for development and troubleshooting
+
+# Determine log path; parameter overrides config, otherwise use temporary directory
+if ($PSBoundParameters.ContainsKey('LogPath')) {
+    $logPath = $LogPath
+} elseif ([string]::IsNullOrWhiteSpace($logPath)) {
+    $logPath = [System.IO.Path]::GetTempPath()
+}
+
+# Ensure log directory exists
+if (-not [string]::IsNullOrWhiteSpace($logPath) -and -not (Test-Path $logPath)) {
+    New-Item -ItemType Directory -Force -Path $logPath | Out-Null
+}
 
 # Retrieve Serial from BIOS
 $deviceSerial = (Get-CimInstance win32_bios | Select-Object serialnumber).serialnumber
