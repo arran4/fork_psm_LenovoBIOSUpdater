@@ -8,8 +8,8 @@
 
 .DESCRIPTION
 
-.PARAMETER <Parameter_Name>
-  <Brief description of parameter input required. Repeat this attribute if required>
+.PARAMETER dryRun
+  When specified, operations that would modify BIOS data are logged but not executed.
 
 .INPUTS
     Serial number of device (pulled from BIOS)
@@ -27,6 +27,10 @@
 .EXAMPLE
   
 #>
+
+param(
+    [switch]$dryRun
+)
 
 #---------------------------------------------------------[Initialisations]--------------------------------------------------------
 
@@ -82,9 +86,6 @@ $winAIAInternet = "https://download.lenovo.com/pccbbs/mobiles"
 
 #Script Variables - Declared to stop it being generated multiple times per run
 $script:snipeResult = $null #Blank Snipe result
-
-#DryRun Settings
-$dryRun = $false
 
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
@@ -243,7 +244,7 @@ function New-CustomField
 function Set-BIOSData
 {
     Write-LogBreak
-    if ($dryRun -eq $false)
+    if (-not $dryRun)
     {
         Write-Log "Setting BIOS Data - Commiting to BIOS"
     }
@@ -259,22 +260,29 @@ function Set-BIOSData
         if (-not [string]::IsNullOrWhiteSpace($field.Value) -and ($biosCurrent.Keys -notcontains $field.Key -or ($biosCurrent.Keys -contains $field.Key -and ($biosCurrent.($field.Key)) -ne $field.Value)))
         {
             $noRows = $false
-            if ($dryRun -eq $false)
-            {
-                if ($field.Value -ne "BLANK")
-                {
-                    Write-Log "Setting $($field.Key) to $($field.Value)"
-                    .\WinAIA64.exe -silent -set "`"$($field.Key)=$($field.Value)`""
-                }
-                elseif ($field.Value -eq "BLANK" -and $biosCurrent.Keys -contains $field.Key)
-                {
-                    Write-Log "Setting $($field.Key) to $($field.Value)"
-                    .\WinAIA64.exe -silent -set "`"$($field.Key)=`""
-                }
-            }
-            else
+            if ($field.Value -ne "BLANK")
             {
                 Write-Log "Setting $($field.Key) to $($field.Value)"
+                if (-not $dryRun)
+                {
+                    .\WinAIA64.exe -silent -set "`"$($field.Key)=$($field.Value)`""
+                }
+                else
+                {
+                    Write-Log 'Dry run: skipping write'
+                }
+            }
+            elseif ($field.Value -eq "BLANK" -and $biosCurrent.Keys -contains $field.Key)
+            {
+                Write-Log "Setting $($field.Key) to $($field.Value)"
+                if (-not $dryRun)
+                {
+                    .\WinAIA64.exe -silent -set "`"$($field.Key)=`""
+                }
+                else
+                {
+                    Write-Log 'Dry run: skipping write'
+                }
             }
 
         }
