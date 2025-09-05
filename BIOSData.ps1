@@ -28,6 +28,11 @@
   
 #>
 
+# Ensure script runs only on Windows
+if (-not ($PSVersionTable.OS -like '*Windows*' -or $IsWindows)) {
+    throw "LenovoBIOSUpdater requires Windows to run. WinAIA and BIOS interactions are not supported on non-Windows platforms."
+}
+
 #---------------------------------------------------------[Initialisations]--------------------------------------------------------
 
 #Set Error Action to Silently Continue
