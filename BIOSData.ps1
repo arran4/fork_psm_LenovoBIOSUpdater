@@ -89,26 +89,31 @@ $dryRun = $false
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
 
-function Write-Log ($logMessage)
-{
-    Write-Host "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
-    #Write to logfile if the logpath is set
-    if (-not [string]::IsNullOrWhiteSpace($logPath))
-    {
-        Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
-    }
-}
-function Write-LogBreak ($logMessage)
-{
-    Write-Host "--------------------------------------------------------------------------------------"
-    
-    #Write to logfile if the logpath is set
-    if (-not [string]::IsNullOrWhiteSpace($logPath))
-    {
-        Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "--------------------------------------------------------------------------------------"
-    }
-}
+function Write-Log {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Message,
+        [ValidateSet('Info','Warning','Error')]
+        [string]$Level = 'Info'
+    )
 
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $entry = "$timestamp [$Level] $Message"
+
+    switch ($Level) {
+        'Error'   { $hostColor = 'Red' }
+        'Warning' { $hostColor = 'Yellow' }
+        default   { $hostColor = 'White' }
+    }
+
+    Write-Host $entry -ForegroundColor $hostColor
+
+    if (-not [string]::IsNullOrWhiteSpace($logPath)) {
+        $logFile = Join-Path $logPath 'BIOSData.log'
+        Add-Content -Path $logFile -Value $entry
+    }
+}
 
 function Set-ImageData
 {
@@ -123,7 +128,7 @@ function Set-Inventoried
 
 function Get-SnipeData
 {
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "Retrieving device details from Snipe-IT"
     
     $script:snipeResult = $null #Blank Snipe result
@@ -139,7 +144,7 @@ function Get-SnipeData
         }
         else 
         {
-            Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting"
+            Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting" -Level Error
             exit
         }
     }
@@ -171,25 +176,25 @@ function Get-SnipeData
             }
             elseif ($script:snipeResult.total -eq 0)
             {
-                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
+                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting" -Level Error
                 Exit
             }
             else 
             {
-                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
+                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting" -Level Error
                 Exit
             }
             
         }
         else 
         {
-            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
+            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting" -Level Error
             exit
         }
     }
     catch 
     {
-        Write-Log $_.Exception
+        Write-Log $_.Exception -Level Error
         exit
     }
 }
@@ -204,7 +209,7 @@ function New-CustomField
     # Validate Input and output error if not valid
     if ([string]::IsNullOrWhiteSpace($fieldKey) -and $biosCurrent.Keys -notcontains "USERDEVICE.$fieldKey")
     {
-        Write-LogBreak
+        Write-Log ('-'*86)
         Write-Log "Attempting to create a new Custom Field"
         Write-Log "Cannot create custom field as no valid field name was provided"
         return
@@ -212,7 +217,7 @@ function New-CustomField
 
     if ([string]::IsNullOrWhiteSpace($fieldValue))
     {
-        Write-LogBreak
+        Write-Log ('-'*86)
         Write-Log "Cannot create/update custom field $fieldKey as no valid field data was provided"
         return
     }
@@ -222,7 +227,7 @@ function New-CustomField
     {
         if ($biosCurrent.Keys -contains "USERDEVICE.$fieldKey" -and $biosCurrent."USERDEVICE.$fieldKey" -ne $fieldValue)
         {
-            Write-LogBreak
+            Write-Log ('-'*86)
             Write-Log "Updating Custom Field $fieldKey"
             $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
         }
@@ -242,7 +247,7 @@ function New-CustomField
 
 function Set-BIOSData
 {
-    Write-LogBreak
+    Write-Log ('-'*86)
     if ($dryRun -eq $false)
     {
         Write-Log "Setting BIOS Data - Commiting to BIOS"
@@ -251,7 +256,7 @@ function Set-BIOSData
     {
         Write-Log "Setting BIOS Data - Dry Run"
     }
-    Write-LogBreak
+    Write-Log ('-'*86)
 
     $noRows = $true
     foreach ($field in ($biosDetails.GetEnumerator() | Sort-Object Key))
@@ -290,9 +295,9 @@ function Set-BIOSData
 #Current data is written to log as it is read, custom values are counted so that we do not try to set more than the allowed custom values (5)
 function Get-CurrentBIOSData
 {
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "Retrieving current BIOS data"
-    Write-LogBreak
+    Write-Log ('-'*86)
 
     $script:customFieldsUsed = 0
     if (Test-Path -Path "output.txt")
@@ -332,12 +337,12 @@ function Get-CurrentBIOSData
         }
         else 
         {
-            Write-Log "There was an error retrieving the current BIOS Data, continuing with no data"
+            Write-Log "There was an error retrieving the current BIOS Data, continuing with no data" -Level Warning
         }
     }
     catch 
     {
-        Write-Log "There was an error retrieving the current BIOS Data, exiting"
+        Write-Log "There was an error retrieving the current BIOS Data, exiting" -Level Error
         Exit
     }
     
@@ -359,29 +364,29 @@ Import-Module "$PSScriptRoot/Config.ps1" -Force #Contains protected data (API Ke
 $deviceSerial = (Get-CimInstance win32_bios | Select-Object serialnumber).serialnumber
 #$deviceSerial = $devSerial
 
-Write-LogBreak
+Write-Log ('-'*86)
 if (-not [string]::IsNullOrWhiteSpace($deviceSerial))
 {
     Write-Log "Lenovo BIOS Data Update Script"
     Write-Log "Running on device with serial number $deviceSerial"
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "Serial ($deviceSerial) retrieved from BIOS"
 }
 else 
 {
-    Write-Log "Cannot retrieve serial from BIOS, exiting"
-    Write-LogBreak
+    Write-Log "Cannot retrieve serial from BIOS, exiting" -Level Error
+    Write-Log ('-'*86)
     Exit
 }
 
 # Check that the system in manufactured by Lenovo
 If (((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer) -ne "LENOVO")
 {
-    Write-Log "This is not a Lenovo device it is manafactured by $((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer), exiting"
+    Write-Log "This is not a Lenovo device it is manafactured by $((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer), exiting" -Level Error
     Exit
 }
 
-Write-LogBreak
+Write-Log ('-'*86)
 Write-Log "Checking if WinAIA Utility Exists"
 
 # Check WinAIA exists, if not attempt to download it
@@ -437,7 +442,7 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
                 }
                 else 
                 {
-                    Write-Log "WinAIA unsuccessfully extracted, exiting"
+                    Write-Log "WinAIA unsuccessfully extracted, exiting" -Level Error
                     Exit
                 }
             }
@@ -448,7 +453,7 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
         }
         else 
         {
-            Write-Log "Unable to retrieve WinAIA package, exiting"
+            Write-Log "Unable to retrieve WinAIA package, exiting" -Level Error
             Exit
         }
 
@@ -472,9 +477,9 @@ Get-CurrentBIOSData
 #Insert data if not decomissioning
 if ([string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID))
 {
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "Processing Tasks - Inventory"
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "This is a non-decommission run, setting data"
     Get-SnipeData
     Set-Inventoried
@@ -484,9 +489,9 @@ if ([string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID))
 }
 elseif (-not [string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID) -and $decomIDs -notcontains $TSEnv:TASKSEQUENCEID)
 {
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "Processing Tasks - Imaging"
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "This is a non-decommission run, setting data"
     Get-SnipeData
     Set-ImageData
@@ -496,9 +501,9 @@ elseif (-not [string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID) -and $decomIDs 
 }
 else 
 {
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "Processing Tasks - Decommissioning"
-    Write-LogBreak
+    Write-Log ('-'*86)
     Write-Log "This is a decommission run, blanking all data and setting asset tag to DECOM"
 
     
@@ -524,6 +529,6 @@ else
 #Set BIOS Data
 Set-BIOSData
 
-Write-LogBreak
+Write-Log ('-'*86)
 Write-Log "BIOS Data checks complete, exiting"
-Write-LogBreak
+Write-Log ('-'*86)
