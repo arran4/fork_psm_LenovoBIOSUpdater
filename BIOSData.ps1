@@ -1,4 +1,8 @@
 #requires -version 2
+
+[CmdletBinding()]
+param()
+
 <#
 .SYNOPSIS
   Reads Snipe-IT for machine data, then uses this data to build an array of information to set the BIOS fields on a Lenovo Device compatible with WinAIA
@@ -91,18 +95,15 @@ $dryRun = $false
 
 function Write-Log ($logMessage)
 {
-    Write-Host "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
-    #Write to logfile if the logpath is set
+    Write-Verbose "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
     if (-not [string]::IsNullOrWhiteSpace($logPath))
     {
         Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
     }
 }
-function Write-LogBreak ($logMessage)
+function Write-LogBreak
 {
-    Write-Host "--------------------------------------------------------------------------------------"
-    
-    #Write to logfile if the logpath is set
+    Write-Debug "--------------------------------------------------------------------------------------"
     if (-not [string]::IsNullOrWhiteSpace($logPath))
     {
         Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "--------------------------------------------------------------------------------------"
@@ -112,8 +113,14 @@ function Write-LogBreak ($logMessage)
 
 function Set-ImageData
 {
-    $biosDetails.'PRELOADPROFILE.IMAGE' = $TSEnv:TASKSEQUENCEID
-    $biosDetails.'PRELOADPROFILE.IMAGEDATE' = "$(Get-Date -format "yyyyMMdd")"
+    [CmdletBinding(SupportsShouldProcess=$true)]
+    param()
+
+    if ($PSCmdlet.ShouldProcess("BIOS details", "Update image data"))
+    {
+        $biosDetails.'PRELOADPROFILE.IMAGE' = $TSEnv:TASKSEQUENCEID
+        $biosDetails.'PRELOADPROFILE.IMAGEDATE' = "$(Get-Date -format "yyyyMMdd")"
+    }
 }
 
 function Set-Inventoried
@@ -123,74 +130,80 @@ function Set-Inventoried
 
 function Get-SnipeData
 {
-    Write-LogBreak
-    Write-Log "Retrieving device details from Snipe-IT"
-    
-    $script:snipeResult = $null #Blank Snipe result
+    [CmdletBinding(SupportsShouldProcess=$true)]
+    param()
 
-    $checkURL=$snipeURL.Substring((Select-String 'http[s]:\/\/' -Input $snipeURL).Matches[0].Length)
-
-    if ($checkURL.IndexOf('/') -eq -1)
+    if ($PSCmdlet.ShouldProcess("Snipe-IT", "Retrieve device details"))
     {
-        #Test ICMP connection
-        if ((Test-Connection -TargetName $checkURL))
+        Write-LogBreak
+        Write-Log "Retrieving device details from Snipe-IT"
+
+        $script:snipeResult = $null #Blank Snipe result
+
+        $checkURL=$snipeURL.Substring((Select-String 'http[s]:\/\/' -Input $snipeURL).Matches[0].Length)
+
+        if ($checkURL.IndexOf('/') -eq -1)
         {
-            Write-Log "Successfully to Snipe-IT server at address $checkURL"
+            #Test ICMP connection
+            if ((Test-Connection -TargetName $checkURL))
+            {
+                Write-Log "Successfully to Snipe-IT server at address $checkURL"
+            }
+            else
+            {
+                Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting"
+                exit
+            }
         }
-        else 
+
+        #Create Snipe Headers
+        $snipeHeaders=@{}
+        $snipeHeaders.Add("accept", "application/json")
+        $snipeHeaders.Add("Authorization", "Bearer $snipeAPIKey")
+
+        try
         {
-            Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting"
+            $script:snipeResult = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$deviceSerial" -Method GET -Headers $snipeHeaders
+
+            if ($script:snipeResult.StatusCode -eq 200)
+            {
+                #Covert from result to JSON content
+                $script:snipeResult = ConvertFrom-JSON($script:snipeResult.Content)
+
+                if ($script:snipeResult.total -eq 1)
+                {
+                    Write-Log "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
+                    $script:snipeResult = $script:snipeResult.rows[0]
+                    $biosDetails.'USERASSETDATA.ASSET_NUMBER' = $script:snipeResult.asset_tag
+                    $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
+                    $biosDetails.'USERASSETDATA.WARRANTY_END' = "$(Get-Date (($script:snipeResult.Warranty_Expires).date) -format "yyyyMMdd")"
+                    $biosDetails.'USERASSETDATA.AMOUNT' = "`$$($script:snipeResult.purchase_cost)"
+                    $biosDetails.'USERASSETDATA.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
+                    $biosDetails.'NETWORKCONNECTION.SYSTEMNAME' = $script:snipeResult.name
+                }
+                elseif ($script:snipeResult.total -eq 0)
+                {
+                    Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
+                    Exit
+                }
+                else
+                {
+                    Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
+                    Exit
+                }
+
+            }
+            else
+            {
+                Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
+                exit
+            }
+        }
+        catch
+        {
+            Write-Log $_.Exception
             exit
         }
-    }
-
-    #Create Snipe Headers
-    $snipeHeaders=@{}
-    $snipeHeaders.Add("accept", "application/json")
-    $snipeHeaders.Add("Authorization", "Bearer $snipeAPIKey")
-
-    try 
-    {
-        $script:snipeResult = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$deviceSerial" -Method GET -Headers $snipeHeaders
-
-        if ($script:snipeResult.StatusCode -eq 200)
-        {
-            #Covert from result to JSON content
-            $script:snipeResult = ConvertFrom-JSON($script:snipeResult.Content)
-
-            if ($script:snipeResult.total -eq 1)
-            {
-                Write-Log "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
-                $script:snipeResult = $script:snipeResult.rows[0]
-                $biosDetails.'USERASSETDATA.ASSET_NUMBER' = $script:snipeResult.asset_tag
-                $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
-                $biosDetails.'USERASSETDATA.WARRANTY_END' = "$(Get-Date (($script:snipeResult.Warranty_Expires).date) -format "yyyyMMdd")"
-                $biosDetails.'USERASSETDATA.AMOUNT' = "`$$($script:snipeResult.purchase_cost)"
-                $biosDetails.'USERASSETDATA.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
-                $biosDetails.'NETWORKCONNECTION.SYSTEMNAME' = $script:snipeResult.name
-            }
-            elseif ($script:snipeResult.total -eq 0)
-            {
-                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
-                Exit
-            }
-            else 
-            {
-                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
-                Exit
-            }
-            
-        }
-        else 
-        {
-            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
-            exit
-        }
-    }
-    catch 
-    {
-        Write-Log $_.Exception
-        exit
     }
 }
 
