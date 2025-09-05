@@ -133,14 +133,24 @@ function Get-SnipeData
     if ($checkURL.IndexOf('/') -eq -1)
     {
         #Test ICMP connection
-        if ((Test-Connection -TargetName $checkURL))
+        try
         {
-            Write-Log "Successfully to Snipe-IT server at address $checkURL"
+            if (Test-Connection -TargetName $checkURL)
+            {
+                Write-Log "Successfully to Snipe-IT server at address $checkURL"
+            }
+            else
+            {
+                $msg = "Cannot connect to Snipe-IT server at address $checkURL"
+                Write-Error $msg
+                return $msg
+            }
         }
-        else 
+        catch
         {
-            Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting"
-            exit
+            $msg = "Test-Connection to $checkURL failed: $_"
+            Write-Error $msg
+            return $msg
         }
     }
 
@@ -168,29 +178,33 @@ function Get-SnipeData
                 $biosDetails.'USERASSETDATA.AMOUNT' = "`$$($script:snipeResult.purchase_cost)"
                 $biosDetails.'USERASSETDATA.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
                 $biosDetails.'NETWORKCONNECTION.SYSTEMNAME' = $script:snipeResult.name
+                return $script:snipeResult
             }
             elseif ($script:snipeResult.total -eq 0)
             {
-                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
-                Exit
+                $msg = "Device $deviceSerial does not exist in Snipe-IT"
+                Write-Error $msg
+                return $msg
             }
-            else 
+            else
             {
-                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
-                Exit
+                $msg = "More than one device with $deviceSerial exists in Snipe-IT"
+                Write-Error $msg
+                return $msg
             }
-            
+
         }
-        else 
+        else
         {
-            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
-            exit
+            $msg = "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error"
+            Write-Error $msg
+            return $msg
         }
     }
-    catch 
+    catch
     {
-        Write-Log $_.Exception
-        exit
+        Write-Error "Failed to retrieve Snipe-IT data: $_"
+        return $_
     }
 }
 
@@ -412,13 +426,13 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
         else 
         {
             Write-Log "Cache Location not specified or found, trying to pull from internet"
-            try 
+            try
             {
-                Invoke-WebRequest -Uri "$winAIAInternet/$winAIAPackage" -OutFile "$winAIAPath\$winAIAPackage" | Out-Null    
+                Invoke-WebRequest -Uri "$winAIAInternet/$winAIAPackage" -OutFile "$winAIAPath\$winAIAPackage" | Out-Null
             }
-            catch 
+            catch
             {
-                $_.Exception.Response.StatusCode.Value__
+                Write-Error "Failed to download WinAIA package: $_"
             }
         }
         
@@ -476,7 +490,8 @@ if ([string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID))
     Write-Log "Processing Tasks - Inventory"
     Write-LogBreak
     Write-Log "This is a non-decommission run, setting data"
-    Get-SnipeData
+    $snipeCallResult = Get-SnipeData
+    if ($snipeCallResult -is [string]) { Write-Error $snipeCallResult; return $snipeCallResult }
     Set-Inventoried
     New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
     New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value    
@@ -488,7 +503,8 @@ elseif (-not [string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID) -and $decomIDs 
     Write-Log "Processing Tasks - Imaging"
     Write-LogBreak
     Write-Log "This is a non-decommission run, setting data"
-    Get-SnipeData
+    $snipeCallResult = Get-SnipeData
+    if ($snipeCallResult -is [string]) { Write-Error $snipeCallResult; return $snipeCallResult }
     Set-ImageData
     Set-Inventoried
     New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
