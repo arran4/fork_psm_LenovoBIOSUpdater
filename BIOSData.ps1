@@ -89,8 +89,20 @@ $dryRun = $false
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
 
-function Write-Log ($logMessage)
-{
+function Write-Log {
+    <#
+    .SYNOPSIS
+    Writes a timestamped message to the console and optional log file.
+
+    .PARAMETER logMessage
+    Text to record.
+
+    .EXAMPLE
+    Write-Log -logMessage "Starting update"
+    #>
+    param (
+        $logMessage
+    )
     Write-Host "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
     #Write to logfile if the logpath is set
     if (-not [string]::IsNullOrWhiteSpace($logPath))
@@ -98,10 +110,22 @@ function Write-Log ($logMessage)
         Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
     }
 }
-function Write-LogBreak ($logMessage)
-{
+function Write-LogBreak {
+    <#
+    .SYNOPSIS
+    Writes a separator line to the console and log file.
+
+    .PARAMETER logMessage
+    Optional message to accompany the break.
+
+    .EXAMPLE
+    Write-LogBreak -logMessage "Starting section"
+    #>
+    param (
+        $logMessage
+    )
     Write-Host "--------------------------------------------------------------------------------------"
-    
+
     #Write to logfile if the logpath is set
     if (-not [string]::IsNullOrWhiteSpace($logPath))
     {
@@ -112,20 +136,50 @@ function Write-LogBreak ($logMessage)
 
 function Set-ImageData
 {
+    <#
+    .SYNOPSIS
+    Sets image-related BIOS fields from task sequence data.
+
+    .PARAMETER None
+    This function has no parameters.
+
+    .EXAMPLE
+    Set-ImageData
+    #>
     $biosDetails.'PRELOADPROFILE.IMAGE' = $TSEnv:TASKSEQUENCEID
     $biosDetails.'PRELOADPROFILE.IMAGEDATE' = "$(Get-Date -format "yyyyMMdd")"
 }
 
 function Set-Inventoried
 {
+    <#
+    .SYNOPSIS
+    Updates BIOS fields to mark the device as inventoried.
+
+    .PARAMETER None
+    This function has no parameters.
+
+    .EXAMPLE
+    Set-Inventoried
+    #>
     $biosDetails.'USERASSETDATA.LAST_INVENTORIED' = "$(Get-Date -format "yyyyMMdd")"
 }
 
 function Get-SnipeData
 {
+    <#
+    .SYNOPSIS
+    Retrieves asset information from Snipe-IT and populates BIOS fields.
+
+    .PARAMETER None
+    This function has no parameters.
+
+    .EXAMPLE
+    Get-SnipeData
+    #>
     Write-LogBreak
     Write-Log "Retrieving device details from Snipe-IT"
-    
+
     $script:snipeResult = $null #Blank Snipe result
 
     $checkURL=$snipeURL.Substring((Select-String 'http[s]:\/\/' -Input $snipeURL).Matches[0].Length)
@@ -196,6 +250,19 @@ function Get-SnipeData
 
 function New-CustomField
 {
+    <#
+    .SYNOPSIS
+    Adds or updates a custom BIOS field.
+
+    .PARAMETER fieldKey
+    Key name appended to the USERDEVICE domain.
+
+    .PARAMETER fieldValue
+    Value to assign to the field.
+
+    .EXAMPLE
+    New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue "12345"
+    #>
     Param(
         [string]$fieldKey, #Appended to the USERDEVICE domain
         [string]$fieldValue #Value the field should contain
@@ -242,12 +309,22 @@ function New-CustomField
 
 function Set-BIOSData
 {
+    <#
+    .SYNOPSIS
+    Commits any pending BIOS field changes using WinAIA.
+
+    .PARAMETER None
+    This function has no parameters.
+
+    .EXAMPLE
+    Set-BIOSData
+    #>
     Write-LogBreak
     if ($dryRun -eq $false)
     {
         Write-Log "Setting BIOS Data - Commiting to BIOS"
     }
-    else 
+    else
     {
         Write-Log "Setting BIOS Data - Dry Run"
     }
@@ -290,6 +367,16 @@ function Set-BIOSData
 #Current data is written to log as it is read, custom values are counted so that we do not try to set more than the allowed custom values (5)
 function Get-CurrentBIOSData
 {
+    <#
+    .SYNOPSIS
+    Reads current BIOS settings into a hashtable for comparison.
+
+    .PARAMETER None
+    This function has no parameters.
+
+    .EXAMPLE
+    Get-CurrentBIOSData
+    #>
     Write-LogBreak
     Write-Log "Retrieving current BIOS data"
     Write-LogBreak
