@@ -14,18 +14,18 @@
 .INPUTS
     Serial number of device (pulled from BIOS)
     Data from Snipe-IT
-    
+
 .OUTPUTS
     Data into the BIOS about the machine
-  
+
 .NOTES
   Version:        1.0
   Author:         Justin Simmonds
   Creation Date:  2022-11-07
   Purpose/Change: Initial script development
-  
+
 .EXAMPLE
-  
+
 #>
 
 #---------------------------------------------------------[Initialisations]--------------------------------------------------------
@@ -89,43 +89,53 @@ $dryRun = $false
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
 
-function Write-Log ($logMessage)
-{
-    Write-Host "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
-    #Write to logfile if the logpath is set
-    if (-not [string]::IsNullOrWhiteSpace($logPath))
-    {
+function Write-LenovoLog {
+    [CmdletBinding()]
+    param(
+        [string]$logMessage
+    )
+
+    Write-Output "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
+    if (-not [string]::IsNullOrWhiteSpace($logPath)) {
         Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
     }
 }
-function Write-LogBreak ($logMessage)
-{
-    Write-Host "--------------------------------------------------------------------------------------"
-    
-    #Write to logfile if the logpath is set
-    if (-not [string]::IsNullOrWhiteSpace($logPath))
-    {
+
+function Write-LenovoLogBreak {
+    [CmdletBinding()]
+    param()
+
+    Write-Output "--------------------------------------------------------------------------------------"
+    if (-not [string]::IsNullOrWhiteSpace($logPath)) {
         Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "--------------------------------------------------------------------------------------"
     }
 }
 
 
-function Set-ImageData
-{
-    $biosDetails.'PRELOADPROFILE.IMAGE' = $TSEnv:TASKSEQUENCEID
-    $biosDetails.'PRELOADPROFILE.IMAGEDATE' = "$(Get-Date -format "yyyyMMdd")"
+function Set-ImageData {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+
+    if ($PSCmdlet.ShouldProcess('BIOS image data', 'Update')) {
+        $biosDetails.'PRELOADPROFILE.IMAGE' = $TSEnv:TASKSEQUENCEID
+        $biosDetails.'PRELOADPROFILE.IMAGEDATE' = "$(Get-Date -format 'yyyyMMdd')"
+    }
 }
 
-function Set-Inventoried
-{
-    $biosDetails.'USERASSETDATA.LAST_INVENTORIED' = "$(Get-Date -format "yyyyMMdd")"
+function Set-Inventoried {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+
+    if ($PSCmdlet.ShouldProcess('BIOS inventoried date', 'Update')) {
+        $biosDetails.'USERASSETDATA.LAST_INVENTORIED' = "$(Get-Date -format 'yyyyMMdd')"
+    }
 }
 
 function Get-SnipeData
 {
-    Write-LogBreak
-    Write-Log "Retrieving device details from Snipe-IT"
-    
+    Write-LenovoLogBreak
+    Write-LenovoLog "Retrieving device details from Snipe-IT"
+
     $script:snipeResult = $null #Blank Snipe result
 
     $checkURL=$snipeURL.Substring((Select-String 'http[s]:\/\/' -Input $snipeURL).Matches[0].Length)
@@ -135,11 +145,11 @@ function Get-SnipeData
         #Test ICMP connection
         if ((Test-Connection -TargetName $checkURL))
         {
-            Write-Log "Successfully to Snipe-IT server at address $checkURL"
+            Write-LenovoLog "Successfully to Snipe-IT server at address $checkURL"
         }
-        else 
+        else
         {
-            Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting"
+            Write-LenovoLog "Cannot connect to Snipe-IT server at address $checkURL exiting"
             exit
         }
     }
@@ -149,7 +159,7 @@ function Get-SnipeData
     $snipeHeaders.Add("accept", "application/json")
     $snipeHeaders.Add("Authorization", "Bearer $snipeAPIKey")
 
-    try 
+    try
     {
         $script:snipeResult = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$deviceSerial" -Method GET -Headers $snipeHeaders
 
@@ -160,7 +170,7 @@ function Get-SnipeData
 
             if ($script:snipeResult.total -eq 1)
             {
-                Write-Log "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
+                Write-LenovoLog "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
                 $script:snipeResult = $script:snipeResult.rows[0]
                 $biosDetails.'USERASSETDATA.ASSET_NUMBER' = $script:snipeResult.asset_tag
                 $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
@@ -171,49 +181,53 @@ function Get-SnipeData
             }
             elseif ($script:snipeResult.total -eq 0)
             {
-                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
+                Write-LenovoLog "Device $deviceSerial does not exist in Snipe-IT, Exiting"
                 Exit
             }
-            else 
+            else
             {
-                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
+                Write-LenovoLog "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
                 Exit
             }
-            
+
         }
-        else 
+        else
         {
-            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
+            Write-LenovoLog "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
             exit
         }
     }
-    catch 
+    catch
     {
-        Write-Log $_.Exception
+        Write-LenovoLog $_.Exception
         exit
     }
 }
 
-function New-CustomField
-{
+function New-CustomField {
+    [CmdletBinding(SupportsShouldProcess)]
     Param(
         [string]$fieldKey, #Appended to the USERDEVICE domain
         [string]$fieldValue #Value the field should contain
     ) #end param
- 
+
     # Validate Input and output error if not valid
     if ([string]::IsNullOrWhiteSpace($fieldKey) -and $biosCurrent.Keys -notcontains "USERDEVICE.$fieldKey")
     {
-        Write-LogBreak
-        Write-Log "Attempting to create a new Custom Field"
-        Write-Log "Cannot create custom field as no valid field name was provided"
+        Write-LenovoLogBreak
+        Write-LenovoLog "Attempting to create a new Custom Field"
+        Write-LenovoLog "Cannot create custom field as no valid field name was provided"
         return
     }
 
     if ([string]::IsNullOrWhiteSpace($fieldValue))
     {
-        Write-LogBreak
-        Write-Log "Cannot create/update custom field $fieldKey as no valid field data was provided"
+        Write-LenovoLogBreak
+        Write-LenovoLog "Cannot create/update custom field $fieldKey as no valid field data was provided"
+        return
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("custom field $fieldKey", 'Set value')) {
         return
     }
 
@@ -222,36 +236,39 @@ function New-CustomField
     {
         if ($biosCurrent.Keys -contains "USERDEVICE.$fieldKey" -and $biosCurrent."USERDEVICE.$fieldKey" -ne $fieldValue)
         {
-            Write-LogBreak
-            Write-Log "Updating Custom Field $fieldKey"
+            Write-LenovoLogBreak
+            Write-LenovoLog "Updating Custom Field $fieldKey"
             $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
         }
         elseif ($biosCurrent.Keys -notcontains "USERDEVICE.$fieldKey")
         {
-            Write-Log "Creating custom field $fieldKey"
+            Write-LenovoLog "Creating custom field $fieldKey"
             $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
             $script:customFieldsUsed++
         }
     }
-    else 
+    else
     {
-        Write-Log "Cannot create custom field $fieldKey as all possible custom fields used"
+        Write-LenovoLog "Cannot create custom field $fieldKey as all possible custom fields used"
     }
 
 }
 
-function Set-BIOSData
-{
-    Write-LogBreak
+function Set-BIOSData {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+
+    Write-LenovoLogBreak
+    if (-not $PSCmdlet.ShouldProcess('BIOS', 'Write data')) { return }
     if ($dryRun -eq $false)
     {
-        Write-Log "Setting BIOS Data - Commiting to BIOS"
+        Write-LenovoLog "Setting BIOS Data - Commiting to BIOS"
     }
-    else 
+    else
     {
-        Write-Log "Setting BIOS Data - Dry Run"
+        Write-LenovoLog "Setting BIOS Data - Dry Run"
     }
-    Write-LogBreak
+    Write-LenovoLogBreak
 
     $noRows = $true
     foreach ($field in ($biosDetails.GetEnumerator() | Sort-Object Key))
@@ -261,20 +278,20 @@ function Set-BIOSData
             $noRows = $false
             if ($dryRun -eq $false)
             {
-                if ($field.Value -ne "BLANK")
+                if ($field.Value -ne 'BLANK')
                 {
-                    Write-Log "Setting $($field.Key) to $($field.Value)"
+                    Write-LenovoLog "Setting $($field.Key) to $($field.Value)"
                     .\WinAIA64.exe -silent -set "`"$($field.Key)=$($field.Value)`""
                 }
-                elseif ($field.Value -eq "BLANK" -and $biosCurrent.Keys -contains $field.Key)
+                elseif ($field.Value -eq 'BLANK' -and $biosCurrent.Keys -contains $field.Key)
                 {
-                    Write-Log "Setting $($field.Key) to $($field.Value)"
+                    Write-LenovoLog "Setting $($field.Key) to $($field.Value)"
                     .\WinAIA64.exe -silent -set "`"$($field.Key)=`""
                 }
             }
             else
             {
-                Write-Log "Setting $($field.Key) to $($field.Value)"
+                Write-LenovoLog "Setting $($field.Key) to $($field.Value)"
             }
 
         }
@@ -282,26 +299,26 @@ function Set-BIOSData
 
     if ($noRows -eq $true)
     {
-        Write-Log "All data fields are up to date, do not need to write anything"
+        Write-LenovoLog "All data fields are up to date, do not need to write anything"
     }
 }
 
-#Retrieve the current BIOS data from the machine using WinAIA, outputting it to a text file, importing the text file (utility does not send back to stdout) splitting the line at the = and adding the data to a hashtable for data comparison. 
+#Retrieve the current BIOS data from the machine using WinAIA, outputting it to a text file, importing the text file (utility does not send back to stdout) splitting the line at the = and adding the data to a hashtable for data comparison.
 #Current data is written to log as it is read, custom values are counted so that we do not try to set more than the allowed custom values (5)
 function Get-CurrentBIOSData
 {
-    Write-LogBreak
-    Write-Log "Retrieving current BIOS data"
-    Write-LogBreak
+    Write-LenovoLogBreak
+    Write-LenovoLog "Retrieving current BIOS data"
+    Write-LenovoLogBreak
 
     $script:customFieldsUsed = 0
     if (Test-Path -Path "output.txt")
     {
-        Write-Log "Removing previously generated BIOS Settings output file"
+        Write-LenovoLog "Removing previously generated BIOS Settings output file"
         Remove-Item "output.txt"
     }
 
-    try 
+    try
     {
 
         .\WinAIA64.exe -silent -output-file "output.txt" -get
@@ -313,7 +330,7 @@ function Get-CurrentBIOSData
                 $tempData = $null
                 $tempData = $row.Split('=')
                 $biosCurrent.Add($tempData[0], $tempData[1])
-                Write-Log "Setting $($tempData[0]) is currently set to $($tempData[1])"
+                Write-LenovoLog "Setting $($tempData[0]) is currently set to $($tempData[1])"
             }
 
             foreach ($record in $biosCurrent.GetEnumerator())
@@ -325,22 +342,22 @@ function Get-CurrentBIOSData
 
             }
 
-            Write-Log "Currently $script:customFieldsUsed custom data fields are used"
-            Write-Log "Removing generated BIOS Settings output file"
+            Write-LenovoLog "Currently $script:customFieldsUsed custom data fields are used"
+            Write-LenovoLog "Removing generated BIOS Settings output file"
             Remove-Item "output.txt"
 
         }
-        else 
+        else
         {
-            Write-Log "There was an error retrieving the current BIOS Data, continuing with no data"
+            Write-LenovoLog "There was an error retrieving the current BIOS Data, continuing with no data"
         }
     }
-    catch 
+    catch
     {
-        Write-Log "There was an error retrieving the current BIOS Data, exiting"
+        Write-LenovoLog "There was an error retrieving the current BIOS Data, exiting"
         Exit
     }
-    
+
 }
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
@@ -359,48 +376,48 @@ Import-Module "$PSScriptRoot/Config.ps1" -Force #Contains protected data (API Ke
 $deviceSerial = (Get-CimInstance win32_bios | Select-Object serialnumber).serialnumber
 #$deviceSerial = $devSerial
 
-Write-LogBreak
+Write-LenovoLogBreak
 if (-not [string]::IsNullOrWhiteSpace($deviceSerial))
 {
-    Write-Log "Lenovo BIOS Data Update Script"
-    Write-Log "Running on device with serial number $deviceSerial"
-    Write-LogBreak
-    Write-Log "Serial ($deviceSerial) retrieved from BIOS"
+    Write-LenovoLog "Lenovo BIOS Data Update Script"
+    Write-LenovoLog "Running on device with serial number $deviceSerial"
+    Write-LenovoLogBreak
+    Write-LenovoLog "Serial ($deviceSerial) retrieved from BIOS"
 }
-else 
+else
 {
-    Write-Log "Cannot retrieve serial from BIOS, exiting"
-    Write-LogBreak
+    Write-LenovoLog "Cannot retrieve serial from BIOS, exiting"
+    Write-LenovoLogBreak
     Exit
 }
 
 # Check that the system in manufactured by Lenovo
 If (((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer) -ne "LENOVO")
 {
-    Write-Log "This is not a Lenovo device it is manafactured by $((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer), exiting"
+    Write-LenovoLog "This is not a Lenovo device it is manafactured by $((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer), exiting"
     Exit
 }
 
-Write-LogBreak
-Write-Log "Checking if WinAIA Utility Exists"
+Write-LenovoLogBreak
+Write-LenovoLog "Checking if WinAIA Utility Exists"
 
 # Check WinAIA exists, if not attempt to download it
 if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
 {
-    Write-Log "WinAIA not found, downloading"
+    Write-LenovoLog "WinAIA not found, downloading"
 
     # Create temp directory for utility and log output file
     if (!(Test-Path -Path $winAIAPath)) {
         New-Item -Path $winAIAPath -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
-        Write-Log "Creating Lenovo Directory"
+        Write-LenovoLog "Creating Lenovo Directory"
     }
 
     try
     {
         if (-not [string]::IsNullOrWhiteSpace($winAIACache) -and (Test-Path "$winAIACache\$winAIAPackage" -PathType Leaf))
         {
-            Write-Log "Cache Location specified and found, trying to pull from cache"
-            try 
+            Write-LenovoLog "Cache Location specified and found, trying to pull from cache"
+            try
             {
                 Copy-Item "$winAIACache\$winAIAPackage" -Destination $winAIAPath
             }
@@ -409,46 +426,46 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
                 $_.Exception.Response.StatusCode.Value__
             }
         }
-        else 
+        else
         {
-            Write-Log "Cache Location not specified or found, trying to pull from internet"
-            try 
+            Write-LenovoLog "Cache Location not specified or found, trying to pull from internet"
+            try
             {
-                Invoke-WebRequest -Uri "$winAIAInternet/$winAIAPackage" -OutFile "$winAIAPath\$winAIAPackage" | Out-Null    
+                Invoke-WebRequest -Uri "$winAIAInternet/$winAIAPackage" -OutFile "$winAIAPath\$winAIAPackage" | Out-Null
             }
-            catch 
+            catch
             {
                 $_.Exception.Response.StatusCode.Value__
             }
         }
-        
+
         if (Test-Path("$winAIAPath/$winAIAPackage"))
         {
-            Write-Log "Retrieved WinAIA package, trying to extract"
-            try 
+            Write-LenovoLog "Retrieved WinAIA package, trying to extract"
+            try
             {
                 Set-Location -Path $winAIAPath
 
                 Start-Process "$winAIAPath\$winAIAPackage" -ArgumentList "/VERYSILENT /DIR=.\ /EXTRACT=YES" -Wait
-                
+
                 if (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf)
                 {
-                    Write-Log "WinAIA successfully extracted, continuing"
+                    Write-LenovoLog "WinAIA successfully extracted, continuing"
                 }
-                else 
+                else
                 {
-                    Write-Log "WinAIA unsuccessfully extracted, exiting"
+                    Write-LenovoLog "WinAIA unsuccessfully extracted, exiting"
                     Exit
                 }
             }
-            catch 
+            catch
             {
                 $_.Exception.Response.StatusCode.Value__
             }
         }
-        else 
+        else
         {
-            Write-Log "Unable to retrieve WinAIA package, exiting"
+            Write-LenovoLog "Unable to retrieve WinAIA package, exiting"
             Exit
         }
 
@@ -458,9 +475,9 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
         $_.Exception.Response.StatusCode.Value__
     }
 }
-else 
+else
 {
-    Write-Log "WinAIA Found, Continuing"
+    Write-LenovoLog "WinAIA Found, Continuing"
 }
 
 #Set location to AIA Path
@@ -472,42 +489,42 @@ Get-CurrentBIOSData
 #Insert data if not decomissioning
 if ([string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID))
 {
-    Write-LogBreak
-    Write-Log "Processing Tasks - Inventory"
-    Write-LogBreak
-    Write-Log "This is a non-decommission run, setting data"
+    Write-LenovoLogBreak
+    Write-LenovoLog "Processing Tasks - Inventory"
+    Write-LenovoLogBreak
+    Write-LenovoLog "This is a non-decommission run, setting data"
     Get-SnipeData
     Set-Inventoried
     New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
-    New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value    
+    New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value
 
 }
 elseif (-not [string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID) -and $decomIDs -notcontains $TSEnv:TASKSEQUENCEID)
 {
-    Write-LogBreak
-    Write-Log "Processing Tasks - Imaging"
-    Write-LogBreak
-    Write-Log "This is a non-decommission run, setting data"
+    Write-LenovoLogBreak
+    Write-LenovoLog "Processing Tasks - Imaging"
+    Write-LenovoLogBreak
+    Write-LenovoLog "This is a non-decommission run, setting data"
     Get-SnipeData
     Set-ImageData
     Set-Inventoried
     New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
     New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value
 }
-else 
+else
 {
-    Write-LogBreak
-    Write-Log "Processing Tasks - Decommissioning"
-    Write-LogBreak
-    Write-Log "This is a decommission run, blanking all data and setting asset tag to DECOM"
+    Write-LenovoLogBreak
+    Write-LenovoLog "Processing Tasks - Decommissioning"
+    Write-LenovoLogBreak
+    Write-LenovoLog "This is a decommission run, blanking all data and setting asset tag to DECOM"
 
-    
+
     # Cycle through all default BIOS details and blank them
     foreach ($key in $($biosDetails.Keys))
     {
         $biosDetails.$key = "BLANK"
     }
-    
+
     # Cycle through current BIOS keys in case there are custom fields not catered for in the default fields, if there are, add them to the bios details to set and set the fields to blank
     foreach ($field in $biosCurrent.GetEnumerator())
     {
@@ -524,6 +541,6 @@ else
 #Set BIOS Data
 Set-BIOSData
 
-Write-LogBreak
-Write-Log "BIOS Data checks complete, exiting"
-Write-LogBreak
+Write-LenovoLogBreak
+Write-LenovoLog "BIOS Data checks complete, exiting"
+Write-LenovoLogBreak
