@@ -1,5 +1,6 @@
 #Snipe Data
-$snipeAPIKey = "my.snipe.APIKey"
+Import-Module "$PSScriptRoot\SnipeCredential.psm1" -ErrorAction Stop
+$snipeAPIKey = Get-SnipeApiKey
 $snipeURL = "https://my.snipe.url" #No trailing /
 
 #WinAIACache
