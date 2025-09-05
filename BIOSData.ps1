@@ -121,11 +121,33 @@ function Set-Inventoried
     $biosDetails.'USERASSETDATA.LAST_INVENTORIED' = "$(Get-Date -format "yyyyMMdd")"
 }
 
+<#
+.SYNOPSIS
+    Retrieves device details from Snipe-IT.
+.DESCRIPTION
+    Queries the Snipe-IT API for hardware details using the supplied device serial number.
+.PARAMETER DeviceSerial
+    Serial number of the device to query.  Must be non-empty and consist of only letters and numbers.
+.EXAMPLE
+    PS> Get-SnipeData -DeviceSerial "PF2A1BCD"
+    Retrieves Snipe-IT data for the device with serial PF2A1BCD.
+.EXAMPLE
+    PS> Get-SnipeData -DeviceSerial ""
+    Get-SnipeData : Cannot bind argument to parameter 'DeviceSerial' because it is an empty string.
+#>
 function Get-SnipeData
 {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [ValidatePattern('^[A-Za-z0-9]+$')]
+        [string]$DeviceSerial
+    )
+
     Write-LogBreak
     Write-Log "Retrieving device details from Snipe-IT"
-    
+
     $script:snipeResult = $null #Blank Snipe result
 
     $checkURL=$snipeURL.Substring((Select-String 'http[s]:\/\/' -Input $snipeURL).Matches[0].Length)
@@ -137,7 +159,7 @@ function Get-SnipeData
         {
             Write-Log "Successfully to Snipe-IT server at address $checkURL"
         }
-        else 
+        else
         {
             Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting"
             exit
@@ -149,9 +171,9 @@ function Get-SnipeData
     $snipeHeaders.Add("accept", "application/json")
     $snipeHeaders.Add("Authorization", "Bearer $snipeAPIKey")
 
-    try 
+    try
     {
-        $script:snipeResult = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$deviceSerial" -Method GET -Headers $snipeHeaders
+        $script:snipeResult = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$DeviceSerial" -Method GET -Headers $snipeHeaders
 
         if ($script:snipeResult.StatusCode -eq 200)
         {
@@ -160,7 +182,7 @@ function Get-SnipeData
 
             if ($script:snipeResult.total -eq 1)
             {
-                Write-Log "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
+                Write-Log "Sucessfully retrieved device information for $DeviceSerial from Snipe-IT"
                 $script:snipeResult = $script:snipeResult.rows[0]
                 $biosDetails.'USERASSETDATA.ASSET_NUMBER' = $script:snipeResult.asset_tag
                 $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
@@ -171,74 +193,85 @@ function Get-SnipeData
             }
             elseif ($script:snipeResult.total -eq 0)
             {
-                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
+                Write-Log "Device $DeviceSerial does not exist in Snipe-IT, Exiting"
                 Exit
             }
-            else 
+            else
             {
-                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
+                Write-Log "More than one device with $DeviceSerial exists in Snipe-IT, Exiting"
                 Exit
             }
-            
+
         }
-        else 
+        else
         {
-            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
+            Write-Log "Cannot retrieve device $DeviceSerial from Snipe-IT due to unknown error, exiting"
             exit
         }
     }
-    catch 
+    catch
     {
         Write-Log $_.Exception
         exit
     }
 }
 
+
+<#
+.SYNOPSIS
+    Creates or updates a custom BIOS field.
+.DESCRIPTION
+    Adds or updates a custom field under the USERDEVICE domain.  Up to five custom fields are supported.
+.PARAMETER FieldKey
+    Name of the custom field.  Only uppercase letters, numbers and underscores are permitted.
+.PARAMETER FieldValue
+    Value that the field should contain.
+.EXAMPLE
+    PS> New-CustomField -FieldKey "ITAM_NUMBER" -FieldValue "12345"
+    Creates or updates the custom field ITAM_NUMBER.
+.EXAMPLE
+    PS> New-CustomField -FieldKey "" -FieldValue "12345"
+    New-CustomField : Cannot bind argument to parameter 'FieldKey' because it is an empty string.
+#>
 function New-CustomField
 {
+    [CmdletBinding()]
     Param(
-        [string]$fieldKey, #Appended to the USERDEVICE domain
-        [string]$fieldValue #Value the field should contain
-    ) #end param
- 
-    # Validate Input and output error if not valid
-    if ([string]::IsNullOrWhiteSpace($fieldKey) -and $biosCurrent.Keys -notcontains "USERDEVICE.$fieldKey")
-    {
-        Write-LogBreak
-        Write-Log "Attempting to create a new Custom Field"
-        Write-Log "Cannot create custom field as no valid field name was provided"
-        return
-    }
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [ValidatePattern('^[A-Z0-9_]+$')]
+        [string]$FieldKey, #Appended to the USERDEVICE domain
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FieldValue #Value the field should contain
+    )
 
-    if ([string]::IsNullOrWhiteSpace($fieldValue))
-    {
-        Write-LogBreak
-        Write-Log "Cannot create/update custom field $fieldKey as no valid field data was provided"
-        return
-    }
+    Write-LogBreak
+    Write-Log "Attempting to create a new Custom Field"
 
-    # Check the number of custom fields as 5 is the max, see if they are all used, if not create the field and add it to the hastable
+    # Check the number of custom fields as 5 is the max, see if they are all used, if not create the field and add it to the hashtable
     if ($script:customFieldsUsed -lt 5)
     {
-        if ($biosCurrent.Keys -contains "USERDEVICE.$fieldKey" -and $biosCurrent."USERDEVICE.$fieldKey" -ne $fieldValue)
+        if ($biosCurrent.Keys -contains "USERDEVICE.$FieldKey" -and $biosCurrent."USERDEVICE.$FieldKey" -ne $FieldValue)
         {
             Write-LogBreak
-            Write-Log "Updating Custom Field $fieldKey"
-            $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
+            Write-Log "Updating Custom Field $FieldKey"
+            $biosDetails.Add("USERDEVICE.$FieldKey", $FieldValue)
         }
-        elseif ($biosCurrent.Keys -notcontains "USERDEVICE.$fieldKey")
+        elseif ($biosCurrent.Keys -notcontains "USERDEVICE.$FieldKey")
         {
-            Write-Log "Creating custom field $fieldKey"
-            $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
+            Write-Log "Creating custom field $FieldKey"
+            $biosDetails.Add("USERDEVICE.$FieldKey", $FieldValue)
             $script:customFieldsUsed++
         }
     }
-    else 
+    else
     {
-        Write-Log "Cannot create custom field $fieldKey as all possible custom fields used"
+        Write-Log "Cannot create custom field $FieldKey as all possible custom fields used"
     }
 
 }
+
 
 function Set-BIOSData
 {
@@ -476,7 +509,7 @@ if ([string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID))
     Write-Log "Processing Tasks - Inventory"
     Write-LogBreak
     Write-Log "This is a non-decommission run, setting data"
-    Get-SnipeData
+    Get-SnipeData -DeviceSerial $deviceSerial 
     Set-Inventoried
     New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
     New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value    
@@ -488,7 +521,7 @@ elseif (-not [string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID) -and $decomIDs 
     Write-Log "Processing Tasks - Imaging"
     Write-LogBreak
     Write-Log "This is a non-decommission run, setting data"
-    Get-SnipeData
+    Get-SnipeData -DeviceSerial $deviceSerial 
     Set-ImageData
     Set-Inventoried
     New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
