@@ -149,19 +149,72 @@ function Get-SnipeData
     $snipeHeaders.Add("accept", "application/json")
     $snipeHeaders.Add("Authorization", "Bearer $snipeAPIKey")
 
-    try 
+    $maxRetries = 3
+    $retryDelaySeconds = 5
+    $cachePath = Join-Path -Path $PSScriptRoot -ChildPath 'snipe_cache.json'
+    $apiSucceeded = $false
+
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++)
     {
-        $script:snipeResult = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$deviceSerial" -Method GET -Headers $snipeHeaders
-
-        if ($script:snipeResult.StatusCode -eq 200)
+        try
         {
-            #Covert from result to JSON content
-            $script:snipeResult = ConvertFrom-JSON($script:snipeResult.Content)
+            $response = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$deviceSerial" -Method GET -Headers $snipeHeaders
 
-            if ($script:snipeResult.total -eq 1)
+            if ($response.StatusCode -eq 200)
             {
-                Write-Log "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
-                $script:snipeResult = $script:snipeResult.rows[0]
+                #Covert from result to JSON content
+                $script:snipeResult = ConvertFrom-JSON($response.Content)
+
+                if ($script:snipeResult.total -eq 1)
+                {
+                    Write-Log "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
+                    $script:snipeResult = $script:snipeResult.rows[0]
+                    $script:snipeResult | ConvertTo-Json -Depth 10 | Set-Content -Path $cachePath
+                    $biosDetails.'USERASSETDATA.ASSET_NUMBER' = $script:snipeResult.asset_tag
+                    $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
+                    $biosDetails.'USERASSETDATA.WARRANTY_END' = "$(Get-Date (($script:snipeResult.Warranty_Expires).date) -format "yyyyMMdd")"
+                    $biosDetails.'USERASSETDATA.AMOUNT' = "`$$($script:snipeResult.purchase_cost)"
+                    $biosDetails.'USERASSETDATA.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
+                    $biosDetails.'NETWORKCONNECTION.SYSTEMNAME' = $script:snipeResult.name
+                    $apiSucceeded = $true
+                    break
+                }
+                elseif ($script:snipeResult.total -eq 0)
+                {
+                    Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
+                    Exit
+                }
+                else
+                {
+                    Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
+                    Exit
+                }
+
+            }
+            else
+            {
+                Write-Log "Attempt $attempt: Cannot retrieve device $deviceSerial from Snipe-IT (status $($response.StatusCode))"
+            }
+        }
+        catch
+        {
+            Write-Log "Attempt $attempt failed: $($_.Exception.Message)"
+        }
+
+        if (-not $apiSucceeded -and $attempt -lt $maxRetries)
+        {
+            Start-Sleep -Seconds $retryDelaySeconds
+        }
+    }
+
+    if (-not $apiSucceeded)
+    {
+        if (Test-Path $cachePath)
+        {
+            Write-Log "Using cached Snipe-IT response for $deviceSerial"
+            try
+            {
+                $script:snipeResult = Get-Content -Raw -Path $cachePath | ConvertFrom-Json
                 $biosDetails.'USERASSETDATA.ASSET_NUMBER' = $script:snipeResult.asset_tag
                 $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
                 $biosDetails.'USERASSETDATA.WARRANTY_END' = "$(Get-Date (($script:snipeResult.Warranty_Expires).date) -format "yyyyMMdd")"
@@ -169,28 +222,17 @@ function Get-SnipeData
                 $biosDetails.'USERASSETDATA.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
                 $biosDetails.'NETWORKCONNECTION.SYSTEMNAME' = $script:snipeResult.name
             }
-            elseif ($script:snipeResult.total -eq 0)
+            catch
             {
-                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
-                Exit
+                Write-Log "Failed to load cached data: $($_.Exception.Message)"
+                exit
             }
-            else 
-            {
-                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
-                Exit
-            }
-            
         }
-        else 
+        else
         {
-            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
+            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT after $maxRetries attempts, exiting"
             exit
         }
-    }
-    catch 
-    {
-        Write-Log $_.Exception
-        exit
     }
 }
 
